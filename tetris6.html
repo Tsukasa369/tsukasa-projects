@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>テトリス</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Press Start 2P', cursive;
+            touch-action: manipulation;
+            overflow: hidden;
+            overscroll-behavior-y: contain;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(20, 1fr);
+            width: 300px;
+            height: 600px;
+            background-color: #1a1a2e; /* グリッド自体の背景色 */
+            border: 5px solid #0f3460;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        .grid div { /* グリッド内の各セルの基本スタイル */
+            width: 30px;
+            height: 30px;
+            background-color: transparent; /* 空のセルは透明 */
+            border: 1px solid #16213e;
+            box-sizing: border-box;
+        }
+        .mini-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            width: 120px;
+            height: 120px;
+            background-color: #1a1a2e;
+            border: 3px solid #0f3460;
+            border-radius: 5px;
+        }
+        .mini-grid div {
+            width: 30px;
+            height: 30px;
+            background-color: transparent;
+            border: 1px solid #16213e;
+            box-sizing: border-box;
+        }
+
+        /* テトリミノの個別色指定 (セレクタの特異性を上げる) */
+        .grid div.I { background-color: #00f0f0; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.L { background-color: #f0a000; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.J { background-color: #0000f0; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.O { background-color: #f0f000; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.S { background-color: #00f000; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.T { background-color: #a000f0; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+        .grid div.Z { background-color: #f00000; box-shadow: inset 0 0 5px rgba(255,255,255,0.5); }
+
+        /* mini-grid内のテトリミノの色指定 (同様に特異性を考慮) */
+        .mini-grid div.I { background-color: #00f0f0; }
+        .mini-grid div.L { background-color: #f0a000; }
+        .mini-grid div.J { background-color: #0000f0; }
+        .mini-grid div.O { background-color: #f0f000; }
+        .mini-grid div.S { background-color: #00f000; }
+        .mini-grid div.T { background-color: #a000f0; }
+        .mini-grid div.Z { background-color: #f00000; }
+
+
+        .ghost {
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 1px dashed #fff;
+        }
+        /* .frozen クラスはマーカーとして使用。色は上記の .grid div.X で指定 */
+
+        .app-icon {
+            width: 80px;
+            height: 80px;
+            background-color: #2c3e50;
+            border-radius: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            padding: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+        .control-button {
+            background-color: #4a5568;
+            color: white;
+            font-weight: bold;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 5px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .control-button:hover {
+            background-color: #2d3748;
+        }
+        .control-button:active {
+            background-color: #1a202c;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.6);
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background-color: #2d3748;
+            color: white;
+            padding: 30px;
+            border: 2px solid #e0e0e0;
+            width: 80%;
+            max-width: 400px;
+            text-align: center;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .modal-button {
+            background-color: #e53e3e;
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 18px;
+            margin-top: 20px;
+            transition: background-color 0.2s ease-in-out;
+        }
+        .modal-button:hover {
+            background-color: #c53030;
+        }
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <h1 class="text-4xl mb-2 sm:mb-6 tracking-wider">テトリス</h1>
+
+    <div class="app-icon" id="appIconContainer">
+    </div>
+
+    <div class="flex flex-col md:flex-row items-center md:items-start justify-center gap-4 md:gap-8">
+        <div class="relative">
+            <div class="grid" id="tetris-grid">
+            </div>
+            <div id="gameOverScreen" class="absolute inset-0 bg-black bg-opacity-75 flex flex-col items-center justify-center hidden rounded-lg z-10">
+                <p class="text-3xl text-red-500">ゲームオーバー</p>
+                <p class="text-xl mt-2">スコア: <span id="finalScore">0</span></p>
+                <button id="restartButton" class="mt-6 bg-blue-500 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg">
+                    リスタート
+                </button>
+            </div>
+        </div>
+
+        <div class="flex flex-col items-center md:items-start gap-4 mt-4 md:mt-0">
+            <div>
+                <h2 class="text-xl sm:text-2xl mb-1 sm:mb-2">スコア</h2>
+                <div id="score" class="text-2xl sm:text-3xl font-bold text-yellow-400 p-2 sm:p-3 bg-gray-800 rounded-lg shadow-md min-w-[100px] sm:min-w-[120px] text-center">0</div>
+            </div>
+            <div>
+                <h2 class="text-xl sm:text-2xl mb-1 sm:mb-2">次のブロック</h2>
+                <div class="mini-grid" id="next-tetromino-grid">
+                </div>
+            </div>
+            <button id="startButton" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 sm:py-3 sm:px-6 rounded-lg text-base sm:text-lg w-full md:w-auto">
+                スタート
+            </button>
+             <div class="mt-3 text-xs sm:text-sm text-gray-400 text-center md:text-left">
+                <p>操作:</p>
+                <p>←→↓: 移動, ↑: 回転</p>
+                <p>スペース: ハードドロップ</p>
+                <p>P: ポーズ/再開</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap justify-center md:hidden">
+        <button id="moveLeftButton" class="control-button text-lg">←</button>
+        <button id="rotateButton" class="control-button text-sm">回転</button>
+        <button id="moveRightButton" class="control-button text-lg">→</button>
+        <button id="moveDownButton" class="control-button text-lg">↓</button>
+        <button id="hardDropButton" class="control-button text-sm mt-2 w-full">ハードドロップ</button>
+    </div>
+
+    <div id="pauseModal" class="modal">
+        <div class="modal-content">
+            <h2 class="text-3xl mb-6">ポーズ中</h2>
+            <button id="resumeButton" class="modal-button bg-green-500 hover:bg-green-600">再開</button>
+        </div>
+    </div>
+
+    <script>
+        const gridElement = document.getElementById('tetris-grid');
+        const scoreElement = document.getElementById('score');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreElement = document.getElementById('finalScore');
+        const nextTetrominoGridElement = document.getElementById('next-tetromino-grid');
+        const appIconContainer = document.getElementById('appIconContainer');
+        const pauseModal = document.getElementById('pauseModal');
+        const resumeButton = document.getElementById('resumeButton');
+
+        const GRID_WIDTH = 10;
+        const GRID_HEIGHT = 20;
+        let score = 0;
+        let timerId = null;
+        let currentPosition = 0;
+        let currentRotation = 0;
+        let currentTetromino;
+        let nextTetromino;
+        let isPaused = false;
+        let isGameOver = false;
+        
+        const INITIAL_GAME_SPEED = 1000;
+        const MIN_GAME_SPEED = 180;
+        const SCORE_THRESHOLD_FOR_SPEED_INCREASE = 750;
+        const SPEED_DECREMENT_MS = 75;
+        let gameSpeed = INITIAL_GAME_SPEED;
+
+        const TETROMINOES = {
+            'L': {
+                shape: [
+                    [[0,1],[1,1],[2,1],[2,0]],
+                    [[0,0],[1,0],[1,1],[1,2]],
+                    [[0,2],[0,1],[1,1],[2,1]],
+                    [[1,0],[1,1],[1,2],[2,2]]
+                ],
+                color: 'L'
+            },
+            'J': {
+                shape: [
+                    [[0,0],[1,0],[2,0],[2,1]],
+                    [[0,0],[0,1],[0,2],[1,0]],
+                    [[0,1],[0,2],[1,2],[2,2]],
+                    [[1,2],[2,0],[2,1],[2,2]]
+                ],
+                color: 'J'
+            },
+            'I': {
+                shape: [
+                    [[1,0],[1,1],[1,2],[1,3]],
+                    [[0,2],[1,2],[2,2],[3,2]],
+                    [[2,0],[2,1],[2,2],[2,3]],
+                    [[0,1],[1,1],[2,1],[3,1]]
+                ],
+                color: 'I'
+            },
+            'O': {
+                shape: [
+                    [[0,0],[0,1],[1,0],[1,1]]
+                ],
+                color: 'O'
+            },
+            'S': {
+                shape: [
+                    [[1,0],[1,1],[0,1],[0,2]],
+                    [[0,0],[1,0],[1,1],[2,1]]
+                ],
+                color: 'S'
+            },
+            'Z': {
+                shape: [
+                    [[0,0],[0,1],[1,1],[1,2]],
+                    [[0,1],[1,1],[1,0],[2,0]]
+                ],
+                color: 'Z'
+            },
+            'T': {
+                shape: [
+                    [[0,1],[1,0],[1,1],[1,2]],
+                    [[0,1],[1,1],[1,2],[2,1]],
+                    [[1,0],[1,1],[1,2],[2,1]],
+                    [[0,1],[1,0],[1,1],[2,1]]
+                ],
+                color: 'T'
+            }
+        };
+        const TETROMINO_KEYS = Object.keys(TETROMINOES);
+
+        function createGridCells() {
+            gridElement.innerHTML = '';
+            for (let i = 0; i < GRID_WIDTH * GRID_HEIGHT; i++) {
+                const cell = document.createElement('div');
+                gridElement.appendChild(cell);
+            }
+        }
+        const cells = () => Array.from(gridElement.querySelectorAll('#tetris-grid div'));
+
+        function createNextTetrominoGridCells() {
+            nextTetrominoGridElement.innerHTML = '';
+            for (let i = 0; i < 4 * 4; i++) {
+                const cell = document.createElement('div');
+                nextTetrominoGridElement.appendChild(cell);
+            }
+        }
+        const nextCells = () => Array.from(nextTetrominoGridElement.querySelectorAll('div'));
+
+        function draw() {
+            if (isGameOver || !currentTetromino) return;
+            drawGhost();
+            const currentShape = currentTetromino.shape[currentRotation];
+            const currentXOffset = currentTetromino.xOffset || 0;
+            const gridCells = cells();
+
+            currentShape.forEach(index => {
+                const y = currentPosition + index[0];
+                const x = index[1] + currentXOffset;
+                if (y >= 0 && y < GRID_HEIGHT && x >=0 && x < GRID_WIDTH) {
+                    const cellIndex = y * GRID_WIDTH + x;
+                    if (gridCells[cellIndex]) {
+                        gridCells[cellIndex].classList.add('tetromino', currentTetromino.color);
+                    }
+                }
+            });
+        }
+
+        function undraw() {
+            if (isGameOver || !currentTetromino) return;
+            const gridCells = cells();
+            gridCells.forEach(cell => cell.classList.remove('ghost'));
+
+            if (!currentTetromino) return;
+            const currentShape = currentTetromino.shape[currentRotation];
+            const currentXOffset = currentTetromino.xOffset || 0;
+
+            currentShape.forEach(index => {
+                const y = currentPosition + index[0];
+                const x = index[1] + currentXOffset;
+                 if (y >= 0 && y < GRID_HEIGHT && x >=0 && x < GRID_WIDTH) {
+                    const cellIndex = y * GRID_WIDTH + x;
+                     if (gridCells[cellIndex]) {
+                        gridCells[cellIndex].classList.remove('tetromino', currentTetromino.color);
+                     }
+                }
+            });
+        }
+
+        function drawGhost() {
+            const gridCells = cells();
+            gridCells.forEach(cell => cell.classList.remove('ghost'));
+            if (!currentTetromino) return;
+
+            let ghostPosition = currentPosition;
+            const currentXOffset = currentTetromino.xOffset || 0;
+            while (isValidMove(currentTetromino.shape[currentRotation], ghostPosition + 1, currentXOffset)) {
+                 ghostPosition++;
+            }
+
+            currentTetromino.shape[currentRotation].forEach(index => {
+                const y = ghostPosition + index[0];
+                const x = index[1] + currentXOffset;
+                if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
+                    const cellIndex = y * GRID_WIDTH + x;
+                    if (gridCells[cellIndex] && !gridCells[cellIndex].classList.contains('frozen')) {
+                         gridCells[cellIndex].classList.add('ghost');
+                    }
+                }
+            });
+        }
+
+        function displayNextTetromino() {
+            const displayGridCells = nextCells();
+            displayGridCells.forEach(cell => {
+                cell.className = '';
+            });
+            if (!nextTetromino) return;
+
+            const shape = nextTetromino.shape[0];
+            const minX = Math.min(...shape.map(p => p[1]));
+            const maxX = Math.max(...shape.map(p => p[1]));
+            const minY = Math.min(...shape.map(p => p[0]));
+            const maxY = Math.max(...shape.map(p => p[0]));
+            const shapeWidth = maxX - minX + 1;
+            const shapeHeight = maxY - minY + 1;
+
+            const previewGridCols = 4;
+            const previewGridRows = 4;
+
+            const offsetX = Math.floor((previewGridCols - shapeWidth) / 2);
+            const offsetY = Math.floor((previewGridRows - shapeHeight) / 2);
+
+            shape.forEach(index => {
+                const x = (index[1] - minX) + offsetX;
+                const y = (index[0] - minY) + offsetY;
+
+                if (x >= 0 && x < previewGridCols && y >= 0 && y < previewGridRows) {
+                   const cellIndex = y * previewGridCols + x;
+                    if(displayGridCells[cellIndex]) {
+                        displayGridCells[cellIndex].classList.add(nextTetromino.color);
+                    }
+                }
+            });
+        }
+
+
+        function newTetromino() {
+            if (isGameOver) return;
+            currentPosition = 0;
+            currentRotation = 0;
+
+            if (!nextTetromino) {
+                currentTetromino = getRandomTetromino();
+            } else {
+                currentTetromino = nextTetromino;
+            }
+            nextTetromino = getRandomTetromino();
+
+            const shape = currentTetromino.shape[currentRotation];
+            const minXOffsetInShape = Math.min(...shape.map(p => p[1]));
+            const maxXOffsetInShape = Math.max(...shape.map(p => p[1]));
+            const tetrominoActualWidth = maxXOffsetInShape - minXOffsetInShape + 1;
+            currentTetromino.xOffset = Math.floor((GRID_WIDTH - tetrominoActualWidth) / 2) - minXOffsetInShape;
+
+            const minYOffsetInShape = Math.min(...shape.map(p => p[0]));
+            currentPosition = -minYOffsetInShape;
+
+
+            displayNextTetromino();
+            if (!isValidMove(currentTetromino.shape[currentRotation], currentPosition, currentTetromino.xOffset, true)) {
+                gameOver();
+                return;
+            }
+            draw();
+        }
+
+        function getRandomTetromino() {
+            const rand = Math.floor(Math.random() * TETROMINO_KEYS.length);
+            const key = TETROMINO_KEYS[rand];
+            return { ...JSON.parse(JSON.stringify(TETROMINOES[key])), xOffset: 0 };
+        }
+
+        function isValidMove(shape, newPosition, xGridOffset, isNewPiece = false) {
+            const gridCells = cells();
+            for (let i = 0; i < shape.length; i++) {
+                const y = newPosition + shape[i][0];
+                const x = shape[i][1] + xGridOffset;
+
+                if (x < 0 || x >= GRID_WIDTH || y >= GRID_HEIGHT) {
+                    return false;
+                }
+                if (y >= 0 ) {
+                    const cellIndex = y * GRID_WIDTH + x;
+                    if (gridCells[cellIndex] && gridCells[cellIndex].classList.contains('frozen')) {
+                        return false;
+                    }
+                    if (isNewPiece && gridCells[cellIndex] && gridCells[cellIndex].classList.contains('frozen')) {
+                         return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        function freeze() {
+            if (!currentTetromino) return;
+            const currentShape = currentTetromino.shape[currentRotation];
+            const currentXOffset = currentTetromino.xOffset || 0;
+            const gridCells = cells();
+
+            if (!isValidMove(currentShape, currentPosition + 1, currentXOffset)) {
+                currentShape.forEach(index => {
+                    const y = currentPosition + index[0];
+                    const x = index[1] + currentXOffset;
+                    if (y >= 0 && y < GRID_HEIGHT && x >= 0 && x < GRID_WIDTH) {
+                        const cellIndex = y * GRID_WIDTH + x;
+                        if (gridCells[cellIndex]) {
+                            gridCells[cellIndex].classList.add('frozen');
+                            gridCells[cellIndex].classList.add(currentTetromino.color);
+                            gridCells[cellIndex].classList.remove('tetromino');
+                        }
+                    } else if (y < 0) {
+                        gameOver();
+                        return;
+                    }
+                });
+
+                if (isGameOver) return;
+
+                removeFullRows();
+                newTetromino();
+            }
+        }
+
+        function updateSpeedAndRestartInterval() {
+            const oldSpeed = gameSpeed;
+            const speedLevel = Math.floor(score / SCORE_THRESHOLD_FOR_SPEED_INCREASE);
+            gameSpeed = Math.max(MIN_GAME_SPEED, INITIAL_GAME_SPEED - (speedLevel * SPEED_DECREMENT_MS));
+
+            if (gameSpeed !== oldSpeed) {
+                console.log(`スコア: ${score}, 新しいスピード: ${gameSpeed}ms`);
+                if (timerId && !isPaused && !isGameOver) {
+                    clearInterval(timerId);
+                    timerId = setInterval(gameLoop, gameSpeed);
+                }
+            }
+        }
+
+        function removeFullRows() {
+            let rowsRemoved = 0;
+            const gridCells = cells();
+            for (let y = GRID_HEIGHT - 1; y >= 0; y--) {
+                let isRowFull = true;
+                for (let x = 0; x < GRID_WIDTH; x++) {
+                    const cellIndex = y * GRID_WIDTH + x;
+                    if (!gridCells[cellIndex] || !gridCells[cellIndex].classList.contains('frozen')) {
+                        isRowFull = false;
+                        break;
+                    }
+                }
+
+                if (isRowFull) {
+                    rowsRemoved++;
+                    for (let x = 0; x < GRID_WIDTH; x++) {
+                        gridCells[y * GRID_WIDTH + x].className = '';
+                    }
+                    for (let rowToMove = y; rowToMove > 0; rowToMove--) {
+                        for (let col = 0; col < GRID_WIDTH; col++) {
+                            const cellAboveIndex = (rowToMove - 1) * GRID_WIDTH + col;
+                            const currentCellIndex = rowToMove * GRID_WIDTH + col;
+                            if(gridCells[cellAboveIndex] && gridCells[currentCellIndex]) {
+                                gridCells[currentCellIndex].className = gridCells[cellAboveIndex].className;
+                            }
+                        }
+                    }
+                    for (let x = 0; x < GRID_WIDTH; x++) {
+                        if(gridCells[x]) gridCells[x].className = '';
+                    }
+                    y++;
+                }
+            }
+            if (rowsRemoved > 0) {
+                score += rowsRemoved * 100 * rowsRemoved;
+                scoreElement.textContent = score;
+                updateSpeedAndRestartInterval();
+            }
+        }
+
+        function gameOver() {
+            if (isGameOver) return;
+            isGameOver = true;
+            clearInterval(timerId);
+            timerId = null;
+            gameOverScreen.classList.remove('hidden');
+            finalScoreElement.textContent = score;
+            startButton.textContent = "スタート";
+            startButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-700', 'bg-red-500', 'hover:bg-red-600');
+            startButton.classList.add('bg-green-500', 'hover:bg-green-700');
+            document.body.classList.remove('game-active');
+        }
+
+        function moveLeft() {
+            if (isPaused || isGameOver || !currentTetromino) return;
+            undraw();
+            const currentShape = currentTetromino.shape[currentRotation];
+            const currentXOffset = currentTetromino.xOffset || 0;
+            if (isValidMove(currentShape, currentPosition, currentXOffset - 1)) {
+                 currentTetromino.xOffset--;
+            }
+            draw();
+        }
+
+        function moveRight() {
+            if (isPaused || isGameOver || !currentTetromino) return;
+            undraw();
+            const currentShape = currentTetromino.shape[currentRotation];
+            const currentXOffset = currentTetromino.xOffset || 0;
+            if (isValidMove(currentShape, currentPosition, currentXOffset + 1)) {
+                currentTetromino.xOffset++;
+            }
+            draw();
+        }
+
+        function moveDown() {
+            if (isPaused || isGameOver || !currentTetromino) return;
+            undraw();
+            if (isValidMove(currentTetromino.shape[currentRotation], currentPosition + 1, currentTetromino.xOffset || 0)) {
+                currentPosition++;
+            } else {
+                freeze();
+            }
+            draw();
+        }
+
+        function hardDrop() {
+            if (isPaused || isGameOver || !currentTetromino) return;
+            undraw();
+            const currentXOffset = currentTetromino.xOffset || 0;
+            while(isValidMove(currentTetromino.shape[currentRotation], currentPosition + 1, currentXOffset)) {
+                currentPosition++;
+            }
+            freeze();
+        }
+
+        function rotate() {
+            if (isPaused || isGameOver || !currentTetromino || currentTetromino.color === 'O') return;
+            undraw();
+            const originalRotation = currentRotation;
+            const originalXOffset = currentTetromino.xOffset;
+            const originalYPosition = currentPosition;
+
+            currentRotation = (currentRotation + 1) % currentTetromino.shape.length;
+            
+            const testOffsets = [ { x: 0, y: 0 }, { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 2, y: 0 }, { x: -2, y: 0 }, { x: 0, y: -1 }];
+            let foundValidRotation = false;
+            for (const offset of testOffsets) {
+                if (isValidMove(currentTetromino.shape[currentRotation], originalYPosition + offset.y, originalXOffset + offset.x)) {
+                    currentTetromino.xOffset = originalXOffset + offset.x;
+                    currentPosition = originalYPosition + offset.y;
+                    foundValidRotation = true;
+                    break;
+                }
+            }
+
+            if (!foundValidRotation) {
+                currentRotation = originalRotation;
+                currentTetromino.xOffset = originalXOffset;
+                currentPosition = originalYPosition;
+            }
+            
+            const shape = currentTetromino.shape[currentRotation];
+            const minXInShape = Math.min(...shape.map(p => p[1]));
+            const maxXInShape = Math.max(...shape.map(p => p[1]));
+
+            if (currentTetromino.xOffset + minXInShape < 0) {
+                currentTetromino.xOffset = -minXInShape;
+            }
+            if (currentTetromino.xOffset + maxXInShape >= GRID_WIDTH) {
+                currentTetromino.xOffset = GRID_WIDTH - 1 - maxXInShape;
+            }
+            draw();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (isGameOver && e.key !== 'Enter' && e.key.toLowerCase() !== 'r') {
+                if (['arrowleft', 'arrowright', 'arrowdown', 'arrowup', ' ', 'w', 'a', 's', 'd', 'p'].includes(e.key.toLowerCase())) {
+                    e.preventDefault();
+                }
+                return;
+            }
+
+            const controlKeys = ['arrowleft', 'arrowright', 'arrowdown', 'arrowup', ' ', 'w', 'a', 's', 'd'];
+            if (controlKeys.includes(e.key.toLowerCase())) {
+                if (!isGameOver && (!isPaused || (isPaused && e.key.toLowerCase() === 'p'))) {
+                     e.preventDefault();
+                }
+            }
+            if (e.key.toLowerCase() === 'p') {
+                 e.preventDefault();
+            }
+
+            if (isPaused && e.key.toLowerCase() !== 'p' && e.key !== 'Enter') return;
+
+            if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') {
+                if (!isPaused) moveLeft();
+            } else if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') {
+                if (!isPaused) moveRight();
+            } else if (e.key === 'ArrowDown' || e.key.toLowerCase() === 's') {
+                if (!isPaused) moveDown();
+            } else if (e.key === 'ArrowUp' || e.key.toLowerCase() === 'w') {
+                if (!isPaused) rotate();
+            } else if (e.key === ' ') {
+                if (!isPaused) hardDrop();
+            } else if (e.key.toLowerCase() === 'p') {
+                if (!isGameOver) togglePause();
+            } else if ((e.key === 'Enter' || e.key.toLowerCase() === 'r') && isGameOver && !gameOverScreen.classList.contains('hidden')) {
+                e.preventDefault();
+                restartButton.click();
+            }
+        });
+
+        document.getElementById('moveLeftButton')?.addEventListener('click', () => { if (!isPaused && !isGameOver) moveLeft(); });
+        document.getElementById('moveRightButton')?.addEventListener('click', () => { if (!isPaused && !isGameOver) moveRight(); });
+        document.getElementById('moveDownButton')?.addEventListener('click', () => { if (!isPaused && !isGameOver) moveDown(); });
+        document.getElementById('rotateButton')?.addEventListener('click', () => { if (!isPaused && !isGameOver) rotate(); });
+        document.getElementById('hardDropButton')?.addEventListener('click', () => { if (!isPaused && !isGameOver) hardDrop(); });
+
+
+        function togglePause() {
+            if (isGameOver) return;
+            isPaused = !isPaused;
+            if (isPaused) {
+                clearInterval(timerId);
+                timerId = null; // ポーズ時にタイマーIDをnullに設定
+                pauseModal.style.display = 'flex';
+                startButton.textContent = "再開";
+                startButton.classList.remove('bg-yellow-500', 'hover:bg-yellow-700');
+                startButton.classList.add('bg-green-500', 'hover:bg-green-700');
+                document.body.classList.remove('game-active');
+            } else { // 再開時
+                if (!isGameOver) { // ゲームオーバーでなければタイマーを開始
+                     timerId = setInterval(gameLoop, gameSpeed);
+                }
+                pauseModal.style.display = 'none';
+                startButton.textContent = "ポーズ";
+                startButton.classList.remove('bg-green-500', 'hover:bg-green-700');
+                startButton.classList.add('bg-yellow-500', 'hover:bg-yellow-700');
+                document.body.classList.add('game-active');
+            }
+        }
+
+        resumeButton.addEventListener('click', () => {
+            if(isPaused) togglePause();
+        });
+
+        function gameLoop() {
+            if (isPaused || isGameOver) return;
+            moveDown();
+        }
+
+        function resetGame() {
+            const gridCells = cells();
+            gridCells.forEach(cell => cell.className = '');
+            score = 0;
+            scoreElement.textContent = score;
+            currentPosition = 0;
+            currentRotation = 0;
+            isPaused = false;
+            isGameOver = false;
+            nextTetromino = null;
+            gameSpeed = INITIAL_GAME_SPEED;
+
+            gameOverScreen.classList.add('hidden');
+            if (pauseModal.style.display === 'flex') {
+                pauseModal.style.display = 'none';
+            }
+            if (timerId) {
+                clearInterval(timerId);
+                timerId = null;
+            }
+            document.body.classList.remove('game-active');
+        }
+
+        function startGame() {
+             if (timerId && !isPaused) {
+                return;
+            }
+            if (isPaused) {
+                togglePause();
+                return;
+            }
+
+            resetGame();
+            newTetromino();
+            if (isGameOver) return;
+
+            timerId = setInterval(gameLoop, gameSpeed);
+            startButton.textContent = "ポーズ";
+            startButton.classList.remove('bg-green-500', 'hover:bg-green-700');
+            startButton.classList.add('bg-yellow-500', 'hover:bg-yellow-700');
+            document.body.classList.add('game-active');
+        }
+
+        startButton.addEventListener('click', () => {
+            if (isGameOver) {
+                startGame();
+            } else if (!timerId && !isPaused) {
+                startGame();
+            } else {
+                togglePause();
+            }
+        });
+
+        restartButton.addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            startGame();
+        });
+
+        function createAppIcon() {
+            const svgNS = "http://www.w3.org/2000/svg";
+            const svg = document.createElementNS(svgNS, "svg");
+            svg.setAttribute("viewBox", "0 0 40 40");
+            svg.setAttribute("width", "100%");
+            svg.setAttribute("height", "100%");
+
+            const colors = ['#00f0f0', '#f0a000', '#0000f0', '#f0f000', '#00f000', '#a000f0', '#f00000'];
+            const iconBlocks = [
+                { x: 10, y: 0, color: colors[5] }, { x: 0, y: 10, color: colors[5] }, { x: 10, y: 10, color: colors[5] }, { x: 20, y: 10, color: colors[5] },
+                { x: 30, y: 0, color: colors[1] }, { x: 30, y: 10, color: colors[1] }, { x: 30, y: 20, color: colors[1] }, { x: 20, y: 20, color: colors[1] },
+                { x: 10, y: 20, color: colors[4] }, { x: 0, y: 30, color: colors[4] }, { x: 10, y: 30, color: colors[4] },
+                { x: 0, y: 0, color: colors[0] },
+                { x: 20, y: 0, color: colors[6]},
+                { x: 0, y: 20, color: colors[2]},
+                { x: 20, y: 30, color: colors[3]}, { x: 30, y: 30, color: colors[3]},
+            ];
+
+            iconBlocks.forEach(blockData => {
+                const rect = document.createElementNS(svgNS, "rect");
+                rect.setAttribute("x", blockData.x);
+                rect.setAttribute("y", blockData.y);
+                rect.setAttribute("width", "9.5");
+                rect.setAttribute("height", "9.5");
+                rect.setAttribute("fill", blockData.color);
+                rect.setAttribute("rx", "1.5");
+                rect.setAttribute("ry", "1.5");
+                svg.appendChild(rect);
+            });
+            appIconContainer.innerHTML = '';
+            appIconContainer.appendChild(svg);
+        }
+
+        function init() {
+            createGridCells();
+            createNextTetrominoGridCells();
+            createAppIcon();
+            scoreElement.textContent = score;
+        }
+
+        init();
+    </script>
+</body>
+</html>
