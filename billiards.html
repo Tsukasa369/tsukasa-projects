@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>9-Ball Pro</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#121216;color:#eee;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{display:flex;justify-content:center;padding:18px}.wrap{width:min(1180px,100%)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.title{font-weight:800;font-size:26px;letter-spacing:.08em;color:#e1b74a}.sub{font-size:13px;color:#aaa}.btn{background:#29292f;color:#eee;border:1px solid #4b4b52;border-radius:8px;padding:9px 14px;cursor:pointer;font-weight:700}.btn:hover{background:#38383f}
+canvas{display:block;width:100%;height:auto;background:#121216;border-radius:12px;box-shadow:0 10px 35px #0008;touch-action:none}.note{margin-top:9px;color:#aaa;font-size:13px;line-height:1.5}.note kbd{background:#29292f;border:1px solid #444;border-radius:4px;padding:1px 5px;color:#ddd}
+@media(max-width:700px){body{padding:8px}.title{font-size:19px}.sub{display:none}.btn{padding:7px 10px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><div><div class="title">9-BALL PRO</div><div class="sub">HTML5 Canvas / JavaScript</div></div><button class="btn" id="resetBtn">ラックをリセット (R)</button></div>
+  <canvas id="game" width="1100" height="680"></canvas>
+  <div class="note">操作：手球の近くから<strong>左ドラッグ</strong>して狙いとパワーを決め、離すとショット。右クリックでスピン設定。<kbd>R</kbd>でラックリセット。</div>
+</div>
+<script>
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const W=1100,H=680;
+const TABLE={x:55,y:75,w:990,h:500};
+const PLAY={x:85,y:105,w:930,h:440};
+const BR=13,PR=27,FR=0.991,STOP=.055,MAXP=17,MINP=.25;
+const POCKETS=[[PLAY.x,PLAY.y],[PLAY.x+PLAY.w/2,PLAY.y],[PLAY.x+PLAY.w,PLAY.y],[PLAY.x,PLAY.y+PLAY.h],[PLAY.x+PLAY.w/2,PLAY.y+PLAY.h],[PLAY.x+PLAY.w,PLAY.y+PLAY.h]];
+const COLORS={1:'#f0c823',2:'#265acd',3:'#cd262d',4:'#7837a5',5:'#eb7019',6:'#198741',7:'#7d2326',8:'#121212',9:'#f0c823'};
+let audioCtx=null;
+function beep(freq,dur,decay=20){try{audioCtx??=new (window.AudioContext||window.webkitAudioContext)();const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=freq;o.type='sine';g.gain.setValueAtTime(.001,audioCtx.currentTime);g.gain.exponentialRampToValueAtTime(.08,audioCtx.currentTime+.005);g.gain.exponentialRampToValueAtTime(.001,audioCtx.currentTime+dur);o.connect(g).connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+dur)}catch(e){}}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+function dist(a,b,c,d){return Math.hypot(a-c,b-d)}
+class Ball{
+ constructor(x,y,n=0,cue=false){this.x=x;this.y=y;this.vx=0;this.vy=0;this.n=n;this.cue=cue;this.pocketed=false;this.color=cue?'#f5f5f5':COLORS[n]}
+ speed(){return Math.hypot(this.vx,this.vy)}
+ update(){if(this.pocketed)return;this.x+=this.vx;this.y+=this.vy;this.vx*=FR;this.vy*=FR;if(this.speed()<STOP)this.vx=this.vy=0}
+ draw(){if(this.pocketed)return;ctx.save();ctx.beginPath();ctx.arc(this.x+2,this.y+3,BR+1,0,Math.PI*2);ctx.fillStyle='#051e12';ctx.fill();ctx.beginPath();ctx.arc(this.x,this.y,BR,0,Math.PI*2);ctx.fillStyle=this.color;ctx.fill();ctx.beginPath();ctx.arc(this.x-4,this.y-5,3,0,Math.PI*2);ctx.fillStyle='#eee';ctx.fill();ctx.strokeStyle='#080808';ctx.lineWidth=1;ctx.stroke();if(!this.cue){ctx.beginPath();ctx.arc(this.x,this.y,7,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.fillStyle='#111';ctx.font='bold 10px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(this.n,this.x,this.y+0.5)}ctx.restore()}
+}
+class Game{
+ constructor(){this.reset()}
+ reset(){this.balls=[];this.cue=new Ball(PLAY.x+205,PLAY.y+PLAY.h/2,0,true);this.balls.push(this.cue);let nums=[2,3,4,5,6,7,8];for(let i=nums.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1));[nums[i],nums[j]]=[nums[j],nums[i]]}let layout=[[0,0,1],[1,-.5,nums[0]],[1,.5,nums[1]],[2,-1,nums[2]],[2,0,9],[2,1,nums[3]],[3,-.5,nums[4]],[3,.5,nums[5]],[4,0,nums[6]]],sx=PLAY.x+PLAY.w-280,sy=PLAY.y+PLAY.h/2,spx=Math.sqrt(3)*BR+.8,spy=2*BR+.8;for(const [c,r,n] of layout)this.balls.push(new Ball(sx+c*spx,sy+r*spy,n));this.turn=1;this.shotNo=0;this.fouls=0;this.message='PLAYER 1 - BREAK';this.aiming=false;this.power=0;this.spinX=0;this.spinY=0;this.shotFirstHit=null;this.shotPocketed=[];this.gameOver=false;this.winner=null;this.lastMoving=false}
+ moving(){return this.balls.some(b=>!b.pocketed&&b.speed()>0)}
+ lowest(){let a=this.balls.filter(b=>!b.cue&&!b.pocketed).map(b=>b.n);return a.length?Math.min(...a):null}
+ shoot(angle,power){if(this.gameOver||this.moving()||this.cue.pocketed||power<MINP)return;this.shotFirstHit=null;this.shotPocketed=[];this.cue.vx=Math.cos(angle)*power;this.cue.vy=Math.sin(angle)*power;this.shotNo++;this.aiming=false;this.message=`PLAYER ${this.turn} - SHOOT`;beep(650,.055)}
+ finish(){if(this.gameOver)return;let low=this.lowest(),foul=this.cue.pocketed||this.shotFirstHit===null||(low!==null&&this.shotFirstHit!==low),p9=this.shotPocketed.includes(9);if(p9&&!foul){this.gameOver=true;this.winner=this.turn;this.message=`PLAYER ${this.turn} WINS!  9-BALL`;beep(220,.4);return}if(foul){this.fouls++;this.turn=this.turn===1?2:1;this.placeCue();this.message=`FOUL! PLAYER ${this.turn}: BALL IN HAND`}else{if(!this.shotPocketed.length)this.turn=this.turn===1?2:1;this.message=`PLAYER ${this.turn} - ${this.shotPocketed.length?'CONTINUE':'YOUR TURN'}`}this.shotPocketed=[]}
+ placeCue(){this.cue.pocketed=false;this.cue.vx=this.cue.vy=0;this.cue.x=PLAY.x+160;this.cue.y=PLAY.y+PLAY.h/2;for(let i=0;i<100;i++){if(this.balls.filter(b=>b!==this.cue&&!b.pocketed).every(b=>dist(this.cue.x,this.cue.y,b.x,b.y)>BR*2+2))break;this.cue.x=PLAY.x+60+Math.random()*(PLAY.w/2-110);this.cue.y=PLAY.y+50+Math.random()*(PLAY.h-100)}}
+ pocketCheck(){for(const b of this.balls){if(b.pocketed)continue;for(const [px,py] of POCKETS){if(dist(b.x,b.y,px,py)<PR){b.pocketed=true;b.vx=b.vy=0;if(b.cue)this.message='SCRATCH!';else{this.shotPocketed.push(b.n);beep(150,.22)}break}}}}
+ cushions(){for(const b of this.balls){if(b.pocketed)continue;let m=BR,hit=false;if(b.x-m<PLAY.x&&Math.abs(b.y-PLAY.y)>PR&&Math.abs(b.y-(PLAY.y+PLAY.h))>PR){b.x=PLAY.x+m;b.vx=Math.abs(b.vx);hit=true}else if(b.x+m>PLAY.x+PLAY.w&&Math.abs(b.y-PLAY.y)>PR&&Math.abs(b.y-(PLAY.y+PLAY.h))>PR){b.x=PLAY.x+PLAY.w-m;b.vx=-Math.abs(b.vx);hit=true}if(b.y-m<PLAY.y&&Math.abs(b.x-PLAY.x)>PR&&Math.abs(b.x-(PLAY.x+PLAY.w))>PR){b.y=PLAY.y+m;b.vy=Math.abs(b.vy);hit=true}else if(b.y+m>PLAY.y+PLAY.h&&Math.abs(b.x-PLAY.x)>PR&&Math.abs(b.x-(PLAY.x+PLAY.w))>PR){b.y=PLAY.y+PLAY.h-m;b.vy=-Math.abs(b.vy);hit=true}if(hit&&b.speed()>1)beep(480,.025)}}
+ collisions(){for(let i=0;i<this.balls.length;i++)for(let j=i+1;j<this.balls.length;j++){let a=this.balls[i],b=this.balls[j];if(a.pocketed||b.pocketed)continue;let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy);if(!d||d>=BR*2)continue;let nx=dx/d,ny=dy/d,ov=BR*2-d;a.x-=nx*ov/2;a.y-=ny*ov/2;b.x+=nx*ov/2;b.y+=ny*ov/2;let rv=(a.vx-b.vx)*nx+(a.vy-b.vy)*ny;if(rv<=0)continue;a.vx-=rv*nx;a.vy-=rv*ny;b.vx+=rv*nx;b.vy+=rv*ny;if(this.shotFirstHit===null&&(a.cue||b.cue)){let o=a.cue?b:a;if(!o.cue)this.shotFirstHit=o.n}if(Math.abs(rv)>.35)beep(650,.02)}}
+ update(){let was=this.moving();for(const b of this.balls)b.update();this.collisions();this.cushions();this.pocketCheck();let now=this.moving();if(was&&!now)this.finish()}
+ draw(){ctx.fillStyle='#121216';ctx.fillRect(0,0,W,H);ctx.fillStyle='#5e3519';roundRect(TABLE.x,TABLE.y,TABLE.w,TABLE.h,18);ctx.strokeStyle='#23140a';ctx.lineWidth=4;strokeRound(TABLE.x,TABLE.y,TABLE.w,TABLE.h,18);ctx.fillStyle='#1f1f1f';roundRect(PLAY.x-6,PLAY.y-6,PLAY.w+12,PLAY.h+12,10);ctx.fillStyle='#116739';roundRect(PLAY.x,PLAY.y,PLAY.w,PLAY.h,7);ctx.strokeStyle='#0d522c';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PLAY.x+PLAY.w/2,PLAY.y+8);ctx.lineTo(PLAY.x+PLAY.w/2,PLAY.y+PLAY.h-8);ctx.stroke();this.diamonds();for(const [px,py] of POCKETS){ctx.fillStyle='#040404';ctx.beginPath();ctx.arc(px,py,PR+4,0,Math.PI*2);ctx.fill();ctx.fillStyle='#010101';ctx.beginPath();ctx.arc(px,py,PR,0,Math.PI*2);ctx.fill()}for(const b of this.balls)b.draw();if(this.aiming&&!this.moving()&&!this.gameOver){let p=pointer,dx=p.x-this.cue.x,dy=p.y-this.cue.y,d=Math.max(1,Math.hypot(dx,dy)),ax=-dx/d,ay=-dy/d;ctx.strokeStyle='#f5f5f5';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(this.cue.x,this.cue.y);ctx.lineTo(this.cue.x+ax*240,this.cue.y+ay*240);ctx.stroke();ctx.strokeStyle='#e6be28';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(this.cue.x,this.cue.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.beginPath();ctx.arc(this.cue.x+ax*80,this.cue.y+ay*80,BR,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.stroke()}this.ui();}
+ diamonds(){ctx.fillStyle='#e1b74a';for(const x of [PLAY.x+105,PLAY.x+210,PLAY.x+PLAY.w/2,PLAY.x+PLAY.w-210,PLAY.x+PLAY.w-105])for(const y of [PLAY.y-17,PLAY.y+PLAY.h+17]){ctx.beginPath();ctx.moveTo(x,y-5);ctx.lineTo(x+5,y);ctx.lineTo(x,y+5);ctx.lineTo(x-5,y);ctx.fill()}for(const y of [PLAY.y+105,PLAY.y+210,PLAY.y+PLAY.h/2,PLAY.y+PLAY.h-210,PLAY.y+PLAY.h-105])for(const x of [PLAY.x-17,PLAY.x+PLAY.w+17]){ctx.beginPath();ctx.moveTo(x-5,y);ctx.lineTo(x,y-5);ctx.lineTo(x+5,y);ctx.lineTo(x,y+5);ctx.fill()}}
+ ui(){ctx.fillStyle='#1c1c22';ctx.fillRect(0,0,W,62);ctx.fillStyle='#e1b74a';ctx.font='bold 28px Arial';ctx.fillText('9-BALL PRO',24,39);ctx.fillStyle='#ebebeb';ctx.font='bold 20px Arial';ctx.textAlign='center';ctx.fillText(this.message,W/2,38);ctx.textAlign='left';ctx.fillStyle='#bebec3';ctx.font='16px Arial';ctx.fillText(`Shot ${this.shotNo}   Fouls ${this.fouls}   Target: ${this.lowest()??'-'}`,W-300,37);let x=55,y=610,w=430,h=24;ctx.fillStyle='#2d2d32';roundRect(x,y,w,h,8);ctx.fillStyle='#e1b74a';roundRect(x+2,y+2,(w-4)*this.power/MAXP,h-4,6);ctx.fillStyle='#eee';ctx.font='bold 16px Arial';ctx.fillText('POWER',x+8,y+17);let sx=560,sy=610;ctx.fillStyle='#323237';ctx.beginPath();ctx.arc(sx,sy,25,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(sx+this.spinX*18,sy+this.spinY*18,6,0,Math.PI*2);ctx.fill();ctx.fillStyle='#eee';ctx.font='bold 16px Arial';ctx.fillText('SPIN',sx-23,sy+55);ctx.fillStyle='#a5a5aa';ctx.font='16px Arial';ctx.fillText('Drag from cue ball to aim / power   •   Release to shoot   •   R = rack reset',55,655);if(this.gameOver){ctx.fillStyle='rgba(0,0,0,.58)';ctx.fillRect(0,0,W,H);ctx.fillStyle='#e1b74a';ctx.font='bold 28px Arial';ctx.textAlign='center';ctx.fillText(this.message,W/2,H/2-15);ctx.fillStyle='#fff';ctx.font='bold 20px Arial';ctx.fillText('Press R to play again',W/2,H/2+30);ctx.textAlign='left'}}
+}
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function strokeRound(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.stroke()}
+const game=new Game();let pointer={x:0,y:0};
+function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
+canvas.addEventListener('pointerdown',e=>{pointer=pos(e);if(e.button===2){let sx=560,sy=610;if(dist(pointer.x,pointer.y,sx,sy)<40){game.spinX=clamp((pointer.x-sx)/18,-1,1);game.spinY=clamp((pointer.y-sy)/18,-1,1)}e.preventDefault();return}if(!game.moving()&&!game.gameOver&&dist(pointer.x,pointer.y,game.cue.x,game.cue.y)<55){game.aiming=true;canvas.setPointerCapture(e.pointerId)}});
+canvas.addEventListener('pointermove',e=>{pointer=pos(e);if(game.aiming)game.power=clamp(dist(game.cue.x,game.cue.y,pointer.x,pointer.y)*.075,0,MAXP)});
+canvas.addEventListener('pointerup',e=>{if(!game.aiming)return;pointer=pos(e);let dx=game.cue.x-pointer.x,dy=game.cue.y-pointer.y,p=clamp(Math.hypot(dx,dy)*.075,0,MAXP),a=Math.atan2(dy,dx);game.shoot(a,p);game.power=0});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+document.getElementById('resetBtn').onclick=()=>game.reset();document.addEventListener('keydown',e=>{if(e.key.toLowerCase()==='r')game.reset()});
+function loop(){game.update();game.draw();requestAnimationFrame(loop)}loop();
+</script>
+</body>
+</html>
