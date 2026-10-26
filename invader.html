@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Space Invaders with UFO</title>
+    <style>
+        body {
+            background-color: #111;
+            color: #fff;
+            font-family: sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 20px;
+        }
+        canvas {
+            background-color: #000;
+            border: 2px solid #fff;
+            box-shadow: 0 0 20px rgba(0,255,0,0.3);
+        }
+        .info {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>SPACE INVADERS</h1>
+    <canvas id="gameCanvas" width="600" height="650"></canvas>
+    <div class="info">操作方法: [←][→] 移動 | [SPACE] 発射 | [R] リトライ</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// サウンド合成 (Web Audio API)
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playShootSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.1);
+}
+
+function playExplosionSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const bufferSize = audioCtx.sampleRate * 0.15;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+        data[i] = Math.random() * 2 - 1;
+    }
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = buffer;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+    noise.connect(gain);
+    gain.connect(audioCtx.destination);
+    noise.start();
+}
+
+function playUfoSound() {
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(450, audioCtx.currentTime);
+    osc.frequency.linearRampToValueAtTime(650, audioCtx.currentTime + 0.1);
+    gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.1);
+}
+
+// ドット絵定義
+const PLAYER_PIXELS = [
+    "    1    ",
+    "   111   ",
+    "   111   ",
+    " 1111111 ",
+    "111111111",
+    "111111111",
+    "111111111"
+];
+
+const INVADER_TOP = [
+    "  1111  ",
+    " 111111 ",
+    "11111111",
+    "11 11 11",
+    "11111111",
+    "  1  1  ",
+    " 1 11 1 ",
+    "1 1  1 1"
+];
+
+const INVADER_MID = [
+    "  11111  ",
+    " 1111111 ",
+    "111111111",
+    "11 111 11",
+    "111111111",
+    "  11 11  ",
+    " 11   11 ",
+    " 1     1 "
+];
+
+const INVADER_BOT = [
+    "   1111   ",
+    " 11111111 ",
+    "1111111111",
+    "11 1111 11",
+    "1111111111",
+    "   1111   ",
+    "  11  11  ",
+    "11      11"
+];
+
+const UFO_PIXELS = [
+    "   111111   ",
+    " 1111111111 ",
+    "111111111111",
+    "11 11 11 11 ",
+    "111111111111",
+    "  11  11  11",
+    "   1   1   1"
+];
+
+function drawPixelArt(pattern, color, x, y, pixelSize = 3) {
+    ctx.fillStyle = color;
+    pattern.forEach((row, r) => {
+        for (let c = 0; c < row.length; c++) {
+            if (row[c] === '1') {
+                ctx.fillRect(x + c * pixelSize, y + r * pixelSize, pixelSize, pixelSize);
+            }
+        }
+    });
+}
+
+// ゲーム変数
+let player, bullets, enemyBullets, invaders, bunkers, ufo, ufoTimer, score, direction, gameOver, gameWin;
+const keys = {};
+
+function createBunkers() {
+    const list = [];
+    const startX = 50;
+    const spacing = 135;
+    const bunkerY = 480;
+
+    for (let i = 0; i < 4; i++) {
+        const bx = startX + i * spacing;
+        for (let x = bx; x < bx + 60; x += 6) {
+            for (let y = bunkerY; y < bunkerY + 40; y += 6) {
+                if (!((y < bunkerY + 12 && (x < bx + 12 || x >= bx + 48)) ||
+                      (y >= bunkerY + 24 && (x >= bx + 18 && x < bx + 42)))) {
+                    list.push({ x: x, y: y, width: 6, height: 6 });
+                }
+            }
+        }
+    }
+    return list;
+}
+
+function resetGame() {
+    player = { x: canvas.width / 2 - 13, y: canvas.height - 60, width: 27, height: 21 };
+    bullets = [];
+    enemyBullets = [];
+    invaders = [];
+    ufo = null;
+    ufoTimer = 0;
+    
+    const types = [INVADER_TOP, INVADER_MID, INVADER_BOT];
+    const colors = ['#00ffff', '#ff00ff', '#ffff00'];
+
+    for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 8; c++) {
+            invaders.push({
+                x: 60 + c * 60,
+                y: 80 + r * 45,
+                width: 30,
+                height: 24,
+                pattern: types[r],
+                color: colors[r]
+            });
+        }
+    }
+
+    bunkers = createBunkers();
+    score = 0;
+    direction = 1;
+    gameOver = false;
+    gameWin = false;
+}
+
+function isColliding(a, b) {
+    return a.x < b.x + b.width &&
+           a.x + a.width > b.x &&
+           a.y < b.y + b.height &&
+           a.y + a.height > b.y;
+}
+
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'Space' && !gameOver && !gameWin) {
+        if (bullets.length < 3) {
+            bullets.push({ x: player.x + player.width / 2 - 2, y: player.y, width: 4, height: 10 });
+            playShootSound();
+        }
+    }
+    if ((gameOver || gameWin) && e.code === 'KeyR') {
+        resetGame();
+    }
+});
+
+window.addEventListener('keyup', e => {
+    keys[e.code] = false;
+});
+
+function update() {
+    if (!gameOver && !gameWin) {
+        if (keys['ArrowLeft'] && player.x > 0) player.x -= 5;
+        if (keys['ArrowRight'] && player.x < canvas.width - player.width) player.x += 5;
+
+        // 弾の移動
+        bullets.forEach((b, index) => {
+            b.y -= 8;
+            if (b.y < 0) bullets.splice(index, 1);
+        });
+
+        enemyBullets.forEach((eb, index) => {
+            eb.y += 4;
+            if (eb.y > canvas.height) enemyBullets.splice(index, 1);
+        });
+
+        // UFOの生成・移動処理
+        ufoTimer++;
+        if (!ufo && ufoTimer > 900) { // 約15秒ごとに出現判定
+            if (Math.random() < 0.02) {
+                const startLeft = Math.random() < 0.5;
+                ufo = {
+                    x: startLeft ? -36 : canvas.width,
+                    y: 40,
+                    width: 36,
+                    height: 21,
+                    speed: startLeft ? 2.5 : -2.5
+                };
+                ufoTimer = 0;
+            }
+        }
+
+        if (ufo) {
+            ufo.x += ufo.speed;
+            if (Math.random() < 0.3) playUfoSound();
+
+            if ((ufo.speed > 0 && ufo.x > canvas.width) || (ufo.speed < 0 && ufo.x < -40)) {
+                ufo = null;
+            }
+        }
+
+        // 敵のランダム攻撃
+        if (invaders.length > 0 && Math.random() < 0.015) {
+            const shooter = invaders[Math.floor(Math.random() * invaders.length)];
+            enemyBullets.push({ x: shooter.x + shooter.width / 2 - 2, y: shooter.y + shooter.height, width: 4, height: 10 });
+        }
+
+        // インベーダー移動
+        let moveDown = false;
+        const currentSpeed = 1.2 + (24 - invaders.length) * 0.08;
+
+        for (let inv of invaders) {
+            if (direction === 1 && inv.x + inv.width >= canvas.width - 15) {
+                moveDown = true;
+                break;
+            } else if (direction === -1 && inv.x <= 15) {
+                moveDown = true;
+                break;
+            }
+        }
+
+        if (moveDown) {
+            direction *= -1;
+            invaders.forEach(inv => inv.y += 15);
+        } else {
+            invaders.forEach(inv => inv.x += currentSpeed * direction);
+        }
+
+        // 当たり判定 (自機弾 vs 敵・UFO・ブロック)
+        bullets.forEach((b, bIndex) => {
+            let hit = false;
+            
+            // UFOとの当たり判定
+            if (ufo && isColliding(b, ufo)) {
+                bullets.splice(bIndex, 1);
+                ufo = null;
+                score += 500; // UFOのボーナス点
+                playExplosionSound();
+                return;
+            }
+
+            invaders.forEach((inv, invIndex) => {
+                if (isColliding(b, inv)) {
+                    bullets.splice(bIndex, 1);
+                    invaders.splice(invIndex, 1);
+                    score += 100;
+                    playExplosionSound();
+                    hit = true;
+                }
+            });
+            if (hit) return;
+
+            bunkers.forEach((block, bkIndex) => {
+                if (isColliding(b, block)) {
+                    bullets.splice(bIndex, 1);
+                    bunkers.splice(bkIndex, 1);
+                }
+            });
+        });
+
+        // 当たり判定 (敵弾 vs ブロック・プレイヤー)
+        enemyBullets.forEach((eb, ebIndex) => {
+            bunkers.forEach((block, bkIndex) => {
+                if (isColliding(eb, block)) {
+                    enemyBullets.splice(ebIndex, 1);
+                    bunkers.splice(bkIndex, 1);
+                }
+            });
+
+            if (isColliding(eb, player)) {
+                playExplosionSound();
+                gameOver = true;
+            }
+        });
+
+        // 敵の到達
+        invaders.forEach(inv => {
+            bunkers.forEach((block, bkIndex) => {
+                if (isColliding(inv, block)) bunkers.splice(bkIndex, 1);
+            });
+            if (inv.y + inv.height >= player.y) {
+                playExplosionSound();
+                gameOver = true;
+            }
+        });
+
+        if (invaders.length === 0) gameWin = true;
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (!gameOver && !gameWin) {
+        drawPixelArt(PLAYER_PIXELS, '#00ff00', player.x, player.y);
+
+        if (ufo) {
+            drawPixelArt(UFO_PIXELS, '#ff007f', ufo.x, ufo.y);
+        }
+
+        ctx.fillStyle = '#ffff00';
+        bullets.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+        ctx.fillStyle = '#ff3333';
+        enemyBullets.forEach(eb => ctx.fillRect(eb.x, eb.y, eb.width, eb.height));
+
+        invaders.forEach(inv => drawPixelArt(inv.pattern, inv.color, inv.x, inv.y));
+
+        ctx.fillStyle = '#00ff00';
+        bunkers.forEach(b => ctx.fillRect(b.x, b.y, b.width, b.height));
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '20px sans-serif';
+        ctx.fillText(`SCORE: ${score}`, 15, 30);
+    } else {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = gameOver ? '#ff3333' : '#00ff00';
+        ctx.font = 'bold 50px sans-serif';
+        ctx.fillText(gameOver ? 'GAME OVER' : 'YOU WIN!', canvas.width / 2, canvas.height / 2 - 30);
+
+        ctx.fillStyle = '#fff';
+        ctx.font = '25px sans-serif';
+        ctx.fillText(`FINAL SCORE: ${score}`, canvas.width / 2, canvas.height / 2 + 20);
+        ctx.font = '18px sans-serif';
+        ctx.fillText('Press R to Restart', canvas.width / 2, canvas.height / 2 + 70);
+        ctx.textAlign = 'left';
+    }
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+resetGame();
+gameLoop();
+</script>
+</body>
+</html>
